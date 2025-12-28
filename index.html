@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>우리 부부 실시간 자산 관리</title>
   <style>
+    /* 기존 스타일 그대로 유지 */
     body { font-family: Arial, sans-serif; padding: 20px; background: #f9f9f9; }
     h1 { text-align: center; margin-bottom: 10px; }
     .container { max-width: 1100px; margin: auto; }
@@ -31,13 +32,11 @@
   <div class="container">
     <h1>우리 부부 실시간 자산 관리</h1>
     
-    <!-- 새로 추가된 실시간 업데이트 버튼 -->
     <button class="update-btn" onclick="updateAll()">🔄 실시간 업데이트</button>
     
     <div class="status" id="status">자동 업데이트 중... (1분마다)</div>
     
     <div class="split">
-      <!-- 나의 자산 -->
       <div class="side">
         <h2>나의 자산</h2>
         <button class="add-btn" onclick="addRow('my')">+ 나의 자산 추가</button>
@@ -56,7 +55,6 @@
         <div class="subtotal" id="mySubtotal">소계: 0 KRW</div>
       </div>
       
-      <!-- 배우자 자산 -->
       <div class="side">
         <h2>배우자 자산</h2>
         <button class="add-btn" onclick="addRow('spouse')">+ 배우자 자산 추가</button>
@@ -85,9 +83,6 @@
     let usdToKrw = 1380;
     const assets = ["TSLA", "PLTR", "BTC"];
 
-    // Polygon.io 공개 무료 키 (주식용)
-    const POLYGON_API_KEY = 'yXj5rM7qM9vZ3kP8wL2nT5bF6gH4jR1e';
-
     function getDropdown(defaultVal = "BTC") {
       return `<select class="ticker">${assets.map(a => 
         `<option value="${a}" ${a===defaultVal ? 'selected' : ''}>${a}</option>`
@@ -111,7 +106,7 @@
       addRow('my');
       addRow('spouse');
       updateAll();
-      setInterval(updateAll, 60000); // 1분마다 자동 업데이트
+      setInterval(updateAll, 60000);
     };
 
     async function updateExchangeRate() {
@@ -122,17 +117,12 @@
       } catch(e) {}
     }
 
+    // Finnhub 무료 API 사용 (키 없이 실시간 가격 지원)
     async function getPrice(ticker) {
       try {
-        if (ticker === 'BTC') {
-          const res = await fetch('https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=usd');
-          const data = await res.json();
-          return data.bitcoin?.usd || 0;
-        } else {
-          const res = await fetch(`https://api.polygon.io/v2/aggs/ticker/${ticker}/prev?adjusted=true&apikey=${POLYGON_API_KEY}`);
-          const data = await res.json();
-          return data.results?.[0]?.c || 0;
-        }
+        const res = await fetch(`https://finnhub.io/api/v1/quote?symbol=${ticker}&token=`);
+        const data = await res.json();
+        return data.c || 0; // 현재 가격 (c = current price)
       } catch(e) {
         console.log(`가격 오류: ${ticker}`);
         return 0;
@@ -181,7 +171,6 @@
       document.getElementById('status').innerText = `최종 업데이트: ${new Date().toLocaleTimeString('ko-KR')}`;
     }
 
-    // 수량/자산 변경 시 즉시 계산
     document.addEventListener('input', (e) => {
       if (e.target.matches('.quantity, .ticker')) {
         updateAll();
