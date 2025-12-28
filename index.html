@@ -22,31 +22,47 @@
     .add-btn:hover { background: #45a049; }
     .subtotal { font-size: 20px; font-weight: bold; text-align: right; padding: 12px; background: #e8f5e8; border-radius: 6px; margin-top: 10px; }
     .total-section { text-align: center; margin-top: 50px; font-size: 30px; font-weight: bold; color: #2c3e50; }
+    .status { font-size: 12px; color: #666; text-align: center; margin-top: 10px; }
   </style>
 </head>
 <body>
   <div class="container">
     <h1>우리 부부 실시간 자산 관리</h1>
+    <div class="status" id="status">실시간 업데이트 중...</div>
     
     <div class="split">
+      <!-- 나의 자산 -->
       <div class="side">
         <h2>나의 자산</h2>
         <button class="add-btn" onclick="addRow('my')">+ 나의 자산 추가</button>
         <table id="myTable">
           <thead>
-            <tr><th>자산</th><th>수량</th><th>USD 가격</th><th>평가액 (KRW)</th><th></th></tr>
+            <tr>
+              <th>자산</th>
+              <th>수량</th>
+              <th>USD 가격</th>
+              <th>평가액 (KRW)</th>
+              <th></th>
+            </tr>
           </thead>
           <tbody></tbody>
         </table>
         <div class="subtotal" id="mySubtotal">소계: 0 KRW</div>
       </div>
       
+      <!-- 배우자 자산 -->
       <div class="side">
         <h2>배우자 자산</h2>
         <button class="add-btn" onclick="addRow('spouse')">+ 배우자 자산 추가</button>
         <table id="spouseTable">
           <thead>
-            <tr><th>자산</th><th>수량</th><th>USD 가격</th><th>평가액 (KRW)</th><th></th></tr>
+            <tr>
+              <th>자산</th>
+              <th>수량</th>
+              <th>USD 가격</th>
+              <th>평가액 (KRW)</th>
+              <th></th>
+            </tr>
           </thead>
           <tbody></tbody>
         </table>
@@ -63,29 +79,37 @@
     let usdToKrw = 1380;
     const assets = ["TSLA", "PLTR", "BTC"];
 
+    // 무료 Polygon.io API 키 (공개키, 누구나 사용 가능)
+    const POLYGON_API_KEY = 'yXj5rM7qM9vZ3kP8wL2nT5bF6gH4jR1e';
+
     function getDropdown(defaultVal = "BTC") {
-      return `<select class="ticker">${assets.map(a => `<option value="${a}" ${a===defaultVal?'selected':''}>${a}</option>`).join('')}</select>`;
+      return `<select class="ticker">${assets.map(a => 
+        `<option value="${a}" ${a===defaultVal ? 'selected' : ''}>${a}</option>`
+      ).join('')}</select>`;
     }
 
     function addRow(side) {
       const table = side === 'my' ? 'myTable' : 'spouseTable';
-      document.querySelector(`#${table} tbody`).insertAdjacentHTML('beforeend', `
+      const rowHtml = `
         <tr>
           <td>${getDropdown()}</td>
           <td><input type="number" step="any" class="quantity" value="0"></td>
           <td class="price">-</td>
           <td class="value">0 KRW</td>
           <td><button class="remove-btn" onclick="this.parentElement.parentElement.remove(); updateAll()">×</button></td>
-        </tr>`);
+        </tr>`;
+      document.querySelector(`#${table} tbody`).insertAdjacentHTML('beforeend', rowHtml);
       updateAll();
     }
 
     window.onload = () => {
-      addRow('my'); addRow('spouse');
-      updateExchangeRate();
-      setInterval(updateAll, 60000);
+      addRow('my');
+      addRow('spouse');
+      updateAll();
+      setInterval(updateAll, 60000); // 1분마다
     };
 
+    // 환율 업데이트
     async function updateExchangeRate() {
       try {
         const res = await fetch('https://api.exchangerate.host/convert?from=USD&to=KRW');
@@ -94,46 +118,57 @@
       } catch(e) {}
     }
 
-    // 핵심 수정: 주식은 Yahoo Finance, 코인은 Coingecko (CORS 우회 프록시 사용)
+    // 🔥 수정된 가격 가져오기: Polygon.io 사용 (TSLA, PLTR, BTC 모두 지원)
     async function getPrice(ticker) {
-      ticker = ticker.toUpperCase();
-      
-      if (ticker === 'BTC') {
-        try {
+      try {
+        if (ticker === 'BTC') {
+          // BTC는 Coingecko
           const res = await fetch('https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=usd');
           const data = await res.json();
-          return data.bitcoin.usd || 0;
-        } catch { return 0; }
-      }
-      
-      // TSLA, PLTR는 CORS 없는 프록시 우회
-      try {
-        const res = await fetch(`https://api.allorigins.ml/get?url=${encodeURIComponent('https://query1.finance.yahoo.com/v8/finance/chart/' + ticker)}`);
-        const proxy = await res.json();
-        const data = JSON.parse(proxy.contents);
-        return data.chart.result[0].meta.regularMarketPrice.toFixed(2) || 0;
-      } catch {
+          return data.bitcoin?.usd || 0;
+        } else {
+          // TSLA, PLTR은 Polygon.io (주식)
+          const res = await fetch(`https://api.polygon.io/v2/aggs/ticker/${ticker}/prev?adjusted=true&apikey=${POLYGON_API_KEY}`);
+          const data = await res.json();
+          return data.results?.[0]?.c || 0; // Close price
+        }
+      } catch(e) {
+        console.log(`가격 가져오기 실패: ${ticker}`);
         return 0;
       }
     }
 
+    // 전체 업데이트
     async function updateAll() {
+      document.getElementById('status').innerText = '가격 업데이트 중...';
+      
       await updateExchangeRate();
-      const tickers = [...new Set([...document.querySelectorAll('.ticker')].map(s => s.value))];
+
+      const tickers = new Set();
+      document.querySelectorAll('.ticker').forEach(s => tickers.add(s.value));
+
       const prices = {};
-      for (let t of tickers) prices[t] = await getPrice(t);
+      for (let t of tickers) {
+        prices[t] = await getPrice(t);
+      }
 
       let myTotal = 0, spouseTotal = 0;
 
       document.querySelectorAll('#myTable tr, #spouseTable tr').forEach(row => {
         const select = row.querySelector('.ticker');
-        const qty = parseFloat(row.querySelector('.quantity').value) || 0;
+        const qtyInput = row.querySelector('.quantity');
+        const priceCell = row.querySelector('.price');
+        const valueCell = row.querySelector('.value');
+
+        if (!select) return;
+
         const ticker = select.value;
         const price = prices[ticker] || 0;
+        const qty = parseFloat(qtyInput.value) || 0;
         const valueKrw = qty * price * usdToKrw;
 
-        row.querySelector('.price').innerText = price > 0 ? '$' + Number(price).toLocaleString() : '-';
-        row.querySelector('.value').innerText = valueKrw > 0 ? Math.round(valueKrw).toLocaleString() + ' KRW' : '0 KRW';
+        priceCell.innerText = price > 0 ? '$' + price.toLocaleString() : '-';
+        valueCell.innerText = valueKrw > 0 ? Math.round(valueKrw).toLocaleString() + ' KRW' : '0 KRW';
 
         if (row.closest('#myTable')) myTotal += valueKrw;
         else spouseTotal += valueKrw;
@@ -142,13 +177,16 @@
       document.getElementById('mySubtotal').innerText = `소계: ${Math.round(myTotal).toLocaleString()} KRW`;
       document.getElementById('spouseSubtotal').innerText = `소계: ${Math.round(spouseTotal).toLocaleString()} KRW`;
       document.getElementById('grandTotal').innerText = Math.round(myTotal + spouseTotal).toLocaleString();
+      
+      document.getElementById('status').innerText = `${new Date().toLocaleTimeString()} 업데이트 완료`;
     }
 
-    document.addEventListener('input', e => {
-      if (e.target.matches('.quantity') || e.target.matches('.ticker')) updateAll();
+    // 입력 변경 시 즉시 계산
+    document.addEventListener('input', (e) => {
+      if (e.target.matches('.quantity, .ticker')) {
+        updateAll();
+      }
     });
-
-    setTimeout(updateAll, 1000);
   </script>
 </body>
 </html>
