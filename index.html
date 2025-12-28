@@ -29,38 +29,24 @@
     <h1>우리 부부 실시간 자산 관리</h1>
     
     <div class="split">
-      <!-- 나의 자산 -->
       <div class="side">
         <h2>나의 자산</h2>
         <button class="add-btn" onclick="addRow('my')">+ 나의 자산 추가</button>
         <table id="myTable">
           <thead>
-            <tr>
-              <th>자산</th>
-              <th>수량</th>
-              <th>USD 가격</th>
-              <th>평가액 (KRW)</th>
-              <th></th>
-            </tr>
+            <tr><th>자산</th><th>수량</th><th>USD 가격</th><th>평가액 (KRW)</th><th></th></tr>
           </thead>
           <tbody></tbody>
         </table>
         <div class="subtotal" id="mySubtotal">소계: 0 KRW</div>
       </div>
       
-      <!-- 배우자 자산 -->
       <div class="side">
         <h2>배우자 자산</h2>
         <button class="add-btn" onclick="addRow('spouse')">+ 배우자 자산 추가</button>
         <table id="spouseTable">
           <thead>
-            <tr>
-              <th>자산</th>
-              <th>수량</th>
-              <th>USD 가격</th>
-              <th>평가액 (KRW)</th>
-              <th></th>
-            </tr>
+            <tr><th>자산</th><th>수량</th><th>USD 가격</th><th>평가액 (KRW)</th><th></th></tr>
           </thead>
           <tbody></tbody>
         </table>
@@ -74,79 +60,66 @@
   </div>
 
   <script>
-    let usdToKrw = 1380; // 실시간 업데이트됨
-
+    let usdToKrw = 1380;
     const assets = ["TSLA", "PLTR", "BTC"];
 
-    // 드롭다운 HTML 생성
     function getDropdown(defaultVal = "BTC") {
-      return `<select class="ticker">${assets.map(a => 
-        `<option value="${a}" ${a===defaultVal ? 'selected' : ''}>${a}</option>`
-      ).join('')}</select>`;
+      return `<select class="ticker">${assets.map(a => `<option value="${a}" ${a===defaultVal?'selected':''}>${a}</option>`).join('')}</select>`;
     }
 
-    // 행 추가
     function addRow(side) {
       const table = side === 'my' ? 'myTable' : 'spouseTable';
-      const rowHtml = `
+      document.querySelector(`#${table} tbody`).insertAdjacentHTML('beforeend', `
         <tr>
           <td>${getDropdown()}</td>
           <td><input type="number" step="any" class="quantity" value="0"></td>
           <td class="price">-</td>
           <td class="value">0 KRW</td>
           <td><button class="remove-btn" onclick="this.parentElement.parentElement.remove(); updateAll()">×</button></td>
-        </tr>`;
-      document.querySelector(`#${table} tbody`).insertAdjacentHTML('beforeend', rowHtml);
+        </tr>`);
       updateAll();
     }
 
-    // 페이지 로드 시 기본 행 하나씩 추가
     window.onload = () => {
-      addRow('my');
-      addRow('spouse');
+      addRow('my'); addRow('spouse');
       updateExchangeRate();
-      setInterval(updateAll, 60000); // 1분마다 자동 업데이트
+      setInterval(updateAll, 60000);
     };
 
-    // 환율 업데이트
     async function updateExchangeRate() {
       try {
         const res = await fetch('https://api.exchangerate.host/convert?from=USD&to=KRW');
         const data = await res.json();
         usdToKrw = data.result || 1380;
-      } catch(e) { console.log('환율 실패'); }
+      } catch(e) {}
     }
 
-    // 가격 가져오기
+    // 핵심 수정: 주식은 Yahoo Finance, 코인은 Coingecko (CORS 우회 프록시 사용)
     async function getPrice(ticker) {
       ticker = ticker.toUpperCase();
-      let id = ticker.toLowerCase();
-      if (ticker === 'BTC') id = 'bitcoin';
-
+      
+      if (ticker === 'BTC') {
+        try {
+          const res = await fetch('https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=usd');
+          const data = await res.json();
+          return data.bitcoin.usd || 0;
+        } catch { return 0; }
+      }
+      
+      // TSLA, PLTR는 CORS 없는 프록시 우회
       try {
-        const res = await fetch(`https://api.coingecko.com/api/v3/simple/price?ids=${id}&vs_currencies=usd`);
-        const data = await res.json();
-        return data[id]?.usd || 0;
+        const res = await fetch(`https://api.allorigins.ml/get?url=${encodeURIComponent('https://query1.finance.yahoo.com/v8/finance/chart/' + ticker)}`);
+        const proxy = await res.json();
+        const data = JSON.parse(proxy.contents);
+        return data.chart.result[0].meta.regularMarketPrice.toFixed(2) || 0;
       } catch {
-        // 주식(TSLA, PLTR)은 Coingecko에서 안 될 수 있으니 Yahoo fallback
-        if (ticker === 'TSLA' || ticker === 'PLTR') {
-          try {
-            const yRes = await fetch(`https://query1.finance.yahoo.com/v8/finance/chart/${ticker}?range=1d&interval=1d`);
-            const yData = await yRes.json();
-            return yData.chart.result[0].meta.regularMarketPrice || 0;
-          } catch { return 0; }
-        }
         return 0;
       }
     }
 
-    // 전체 업데이트
     async function updateAll() {
       await updateExchangeRate();
-
-      const tickers = new Set();
-      document.querySelectorAll('.ticker').forEach(s => tickers.add(s.value));
-
+      const tickers = [...new Set([...document.querySelectorAll('.ticker')].map(s => s.value))];
       const prices = {};
       for (let t of tickers) prices[t] = await getPrice(t);
 
@@ -154,37 +127,27 @@
 
       document.querySelectorAll('#myTable tr, #spouseTable tr').forEach(row => {
         const select = row.querySelector('.ticker');
-        const qtyInput = row.querySelector('.quantity');
-        const priceCell = row.querySelector('.price');
-        const valueCell = row.querySelector('.value');
-
-        if (!select) return;
-
+        const qty = parseFloat(row.querySelector('.quantity').value) || 0;
         const ticker = select.value;
         const price = prices[ticker] || 0;
-        const qty = parseFloat(qtyInput.value) || 0;
         const valueKrw = qty * price * usdToKrw;
 
-        priceCell.innerText = price > 0 ? '$' + price.toLocaleString() : '-';
-        valueCell.innerText = valueKrw > 0 ? valueKrw.toFixed(0).replace(/\B(?=(\d{3})+(?!\d))/g, ",") + ' KRW' : '0 KRW';
+        row.querySelector('.price').innerText = price > 0 ? '$' + Number(price).toLocaleString() : '-';
+        row.querySelector('.value').innerText = valueKrw > 0 ? Math.round(valueKrw).toLocaleString() + ' KRW' : '0 KRW';
 
         if (row.closest('#myTable')) myTotal += valueKrw;
         else spouseTotal += valueKrw;
       });
 
-      document.getElementById('mySubtotal').innerText = `소계: ${myTotal.toFixed(0).replace(/\B(?=(\d{3})+(?!\d))/g, ",")} KRW`;
-      document.getElementById('spouseSubtotal').innerText = `소계: ${spouseTotal.toFixed(0).replace(/\B(?=(\d{3})+(?!\d))/g, ",")} KRW`;
-      document.getElementById('grandTotal').innerText = (myTotal + spouseTotal).toFixed(0).replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+      document.getElementById('mySubtotal').innerText = `소계: ${Math.round(myTotal).toLocaleString()} KRW`;
+      document.getElementById('spouseSubtotal').innerText = `소계: ${Math.round(spouseTotal).toLocaleString()} KRW`;
+      document.getElementById('grandTotal').innerText = Math.round(myTotal + spouseTotal).toLocaleString();
     }
 
-    // 입력 변경 시 실시간 계산
-    document.addEventListener('input', (e) => {
-      if (e.target.matches('.quantity') || e.target.matches('.ticker')) {
-        updateAll();
-      }
+    document.addEventListener('input', e => {
+      if (e.target.matches('.quantity') || e.target.matches('.ticker')) updateAll();
     });
 
-    // 초기 업데이트
     setTimeout(updateAll, 1000);
   </script>
 </body>
